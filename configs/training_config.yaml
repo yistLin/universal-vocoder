@@ -1,0 +1,12 @@
+frames_per_sample: 40
+frames_per_slice: 8
+bits: 9
+conditioning_channels: 128
+embedding_dim: 256
+rnn_channels: 896
+fc_channels: 512
+batch_size: 32
+n_steps: 100000
+valid_every: 1000
+valid_ratio: 0.05
+save_every: 5000

@@ -1,3 +1,5 @@
 *.npy
 *.npz
 *.tfevents.*
+*.pt
+metadata*
