@@ -8,7 +8,6 @@ import soundfile as sf
 from jsonargparse import ArgumentParser, ActionConfigFile
 
 from data import load_wav, log_mel_spectrogram
-from models import Vocoder
 
 
 def parse_args():
@@ -46,9 +45,8 @@ def main(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = Vocoder.load_checkpoint(ckpt_path)
+    model = torch.jit.load(ckpt_path)
     model.to(device)
-    model.eval()
 
     wav = load_wav(audio_path, sample_rate)
     mel = log_mel_spectrogram(
@@ -56,11 +54,13 @@ def main(
     ).T
 
     mel = torch.FloatTensor(mel).to(device).transpose(0, 1).unsqueeze(0)
-    wav = model.generate(mel)
+
+    with torch.no_grad():
+        wav = model.generate(mel).squeeze().detach().cpu().numpy()
 
     npy_path_name = Path(audio_path).name
     wav_path = npy_path_name + ".rec.wav" if output_path is None else output_path
-    sf.write(wav_path, wav, model.sample_rate)
+    sf.write(wav_path, wav, sample_rate)
 
 
 if __name__ == "__main__":

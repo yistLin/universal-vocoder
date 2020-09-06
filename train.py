@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train reconstruction model."""
+"""Train universal vocoder."""
 
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +13,8 @@ from torch.utils.tensorboard import SummaryWriter
 from jsonargparse import ArgumentParser, ActionConfigFile
 
 from data import VocoderDataset
-from models import Vocoder
+
+from models import UniversalVocoder
 
 
 def parse_args():
@@ -90,17 +91,20 @@ def main(
         pin_memory=True,
     )
 
-    model = Vocoder(
+    model = UniversalVocoder(
         sample_rate=dataset.sample_rate,
-        mel_channels=dataset.n_mels,
-        conditioning_channels=conditioning_channels,
-        embedding_dim=embedding_dim,
-        rnn_channels=rnn_channels,
-        fc_channels=fc_channels,
+        frames_per_sample=frames_per_sample,
+        frames_per_slice=frames_per_slice,
+        mel_dim=dataset.n_mels,
+        mel_rnn_dim=conditioning_channels,
+        emb_dim=embedding_dim,
+        wav_rnn_dim=rnn_channels,
+        affine_dim=fc_channels,
         bits=bits,
         hop_length=dataset.hop_len,
     )
     model.to(device)
+    model = torch.jit.script(model)
 
     optimizer = Adam(model.parameters())
 
@@ -169,7 +173,8 @@ def main(
             save_dir_path = Path(save_dir)
             save_dir_path.mkdir(parents=True, exist_ok=True)
             checkpoint_path = save_dir_path / f"vocoder-ckpt-{step+1}.pt"
-            model.save_checkpoint(checkpoint_path)
+            torch.jit.save(model.cpu(), str(checkpoint_path))
+            model.to(device)
 
 
 if __name__ == "__main__":

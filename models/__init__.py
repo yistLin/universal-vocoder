@@ -1,1 +1,1 @@
-from .vocoder import *
+from .universal_vocoder import *
