@@ -3,3 +3,4 @@
 *.tfevents.*
 *.pt
 metadata*
+*.wav
