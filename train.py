@@ -3,11 +3,13 @@
 
 from datetime import datetime
 from pathlib import Path
+from warnings import filterwarnings
 
 import tqdm
 import torch
 from torch.nn.functional import cross_entropy
 from torch.optim import Adam
+from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
 from jsonargparse import ArgumentParser, ActionConfigFile
@@ -23,6 +25,7 @@ def parse_args():
     parser.add_argument("data_dir", type=str)
     parser.add_argument("metadata_path", type=str)
     parser.add_argument("--n_workers", type=int, default=8)
+    parser.add_argument("--save_dir", type=str, default=".")
     parser.add_argument("--comment", type=str)
 
     parser.add_argument("--frames_per_sample", type=int, default=40)
@@ -37,7 +40,9 @@ def parse_args():
     parser.add_argument("--valid_every", type=int, default=1000)
     parser.add_argument("--valid_ratio", type=float, default=0.1)
     parser.add_argument("--save_every", type=int, default=10000)
-    parser.add_argument("--save_dir", type=str, default=".")
+    parser.add_argument("--learning_rate", type=float, default=4e-4)
+    parser.add_argument("--decay_every", type=int, default=20000)
+    parser.add_argument("--decay_gamma", type=float, default=0.5)
     parser.add_argument("--training_config", action=ActionConfigFile)
 
     return parser.parse_args()
@@ -47,6 +52,7 @@ def main(
     data_dir,
     metadata_path,
     n_workers,
+    save_dir,
     comment,
     frames_per_sample,
     frames_per_slice,
@@ -60,7 +66,9 @@ def main(
     valid_every,
     valid_ratio,
     save_every,
-    save_dir,
+    learning_rate,
+    decay_every,
+    decay_gamma,
     **kwargs,
 ):
     """Main function."""
@@ -106,7 +114,8 @@ def main(
     model.to(device)
     model = torch.jit.script(model)
 
-    optimizer = Adam(model.parameters())
+    optimizer = Adam(model.parameters(), lr=learning_rate)
+    scheduler = StepLR(optimizer, decay_every, decay_gamma)
 
     if comment is not None:
         log_dir = "logs/"
@@ -116,7 +125,7 @@ def main(
 
     train_iterator = iter(train_loader)
     losses = []
-    pbar = tqdm.tqdm(total=valid_every * train_loader.batch_size)
+    pbar = tqdm.tqdm(total=valid_every * train_loader.batch_size, ncols=0, desc="Train")
 
     for step in range(n_steps):
         try:
@@ -133,11 +142,12 @@ def main(
         loss = cross_entropy(outs.transpose(1, 2), wavs[:, 1:])
 
         losses.append(loss.item())
-        pbar.set_description(f"step = {step+1}, loss = {loss.item():.4f}")
+        pbar.set_postfix(step=step + 1, loss=loss.item())
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         pbar.update(train_loader.batch_size)
 
@@ -148,7 +158,9 @@ def main(
             print(f"[train] loss = {train_loss:.4f}")
             losses = []
 
-            pbar = tqdm.tqdm(total=len(valid_loader.dataset), leave=False)
+            pbar = tqdm.tqdm(
+                total=len(valid_loader.dataset), ncols=0, leave=False, desc="Valid"
+            )
             for mels, wavs in valid_loader:
                 mels = mels.to(device)
                 wavs = wavs.to(device)
@@ -167,7 +179,9 @@ def main(
                 writer.add_scalar("Loss/train", train_loss, step + 1)
                 writer.add_scalar("Loss/valid", valid_loss, step + 1)
 
-            pbar = tqdm.tqdm(total=valid_every * train_loader.batch_size)
+            pbar = tqdm.tqdm(
+                total=valid_every * train_loader.batch_size, ncols=0, desc="Train"
+            )
 
         if (step + 1) % save_every == 0:
             save_dir_path = Path(save_dir)
@@ -178,4 +192,5 @@ def main(
 
 
 if __name__ == "__main__":
+    filterwarnings("ignore")
     main(**vars(parse_args()))

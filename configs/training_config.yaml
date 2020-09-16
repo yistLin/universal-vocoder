@@ -9,4 +9,7 @@ batch_size: 32
 n_steps: 100000
 valid_every: 1000
 valid_ratio: 0.05
-save_every: 5000
+save_every: 10000
+learning_rate: 0.0005
+decay_every: 20000
+decay_gamma: 0.5
