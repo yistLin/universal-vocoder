@@ -110,7 +110,7 @@ def main(
         "utterances": [future.result() for future in tqdm(futures)],
     }
 
-    with open(save_dir / "metadata.csv", "w") as f:
+    with open(save_dir / "metadata.json", "w") as f:
         json.dump(infos, f, indent=2)
 
 

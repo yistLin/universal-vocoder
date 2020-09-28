@@ -68,7 +68,10 @@ class UniversalVocoder(nn.Module):
             (mels.size(0),), self.quant_dim // 2, dtype=torch.long, device=mels.device,
         )
         wavs = torch.empty(
-            mels.size(0), mels.size(1) * self.hop_len, device=mels.device
+            mels.size(0),
+            mels.size(1) * self.hop_len,
+            dtype=torch.long,
+            device=mels.device,
         )
 
         for i, condition in enumerate(torch.unbind(conditions, dim=1)):
