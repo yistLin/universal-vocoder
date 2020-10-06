@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reconstruct waveform from log mel spectrogram."""
 
+from warnings import filterwarnings
 from pathlib import Path
 
 import torch
@@ -14,8 +15,8 @@ def parse_args():
     """Parse command-line arguments."""
     parser = ArgumentParser()
     parser.add_argument("ckpt_path", type=str)
-    parser.add_argument("audio_path", type=str)
-    parser.add_argument("-o", "--output_path", type=str)
+    parser.add_argument("audio_paths", type=str, nargs="+")
+    parser.add_argument("-o", "--output_dir", type=str, default=".")
 
     parser.add_argument("--sample_rate", type=int, default=16000)
     parser.add_argument("--preemph", type=float, default=0.97)
@@ -30,8 +31,8 @@ def parse_args():
 
 def main(
     ckpt_path,
-    audio_path,
-    output_path,
+    audio_paths,
+    output_dir,
     sample_rate,
     preemph,
     hop_len,
@@ -48,20 +49,29 @@ def main(
     model = torch.jit.load(ckpt_path)
     model.to(device)
 
-    wav = load_wav(audio_path, sample_rate)
-    mel = log_mel_spectrogram(
-        wav, preemph, sample_rate, n_mels, n_fft, hop_len, win_len, f_min
-    ).T
+    wavs = [load_wav(audio_path, sample_rate) for audio_path in audio_paths]
+    mels = [
+        log_mel_spectrogram(
+            wav, preemph, sample_rate, n_mels, n_fft, hop_len, win_len, f_min
+        )
+        for wav in wavs
+    ]
+    mel_tensors = [torch.FloatTensor(mel).to(device) for mel in mels]
 
-    mel = torch.FloatTensor(mel).to(device).transpose(0, 1).unsqueeze(0)
+    print("mels length:")
+    for mel in mels:
+        print(len(mel))
 
     with torch.no_grad():
-        wav = model.generate(mel).squeeze().detach().cpu().numpy()
+        wavs = model.generate(mel_tensors)
+        wavs = [wav.cpu().numpy() for wav in wavs]
 
-    npy_path_name = Path(audio_path).name
-    wav_path = npy_path_name + ".rec.wav" if output_path is None else output_path
-    sf.write(wav_path, wav, sample_rate)
+    for wav, audio_path in zip(wavs, audio_paths):
+        wav_path_name = Path(audio_path).name
+        wav_path = Path(output_dir, wav_path_name).with_suffix(".rec.wav")
+        sf.write(wav_path, wav, sample_rate)
 
 
 if __name__ == "__main__":
+    filterwarnings("ignore")
     main(**parse_args())

@@ -1,7 +1,12 @@
 """Universal vocoder"""
+
+from typing import List
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
+from torch.nn.utils.rnn import pad_sequence
 
 
 class UniversalVocoder(nn.Module):
@@ -55,23 +60,45 @@ class UniversalVocoder(nn.Module):
         return self.affine(wav_outs)
 
     @torch.jit.export
-    def generate(self, mels):
-        """Generate waveform from mel spectrogram."""
-        mel_embs, _ = self.mel_rnn(mels)
+    def generate(self, mels: List[Tensor]) -> List[Tensor]:
+        """Generate waveform from mel spectrogram.
+        
+        Args:
+            mels: list of tensor of shape (mel_len, mel_dim)
+
+        Returns:
+            wavs: list of tensor of shape (wav_len)
+        """
+
+        batch_size = len(mels)
+        device = mels[0].device
+
+        mel_lens = [len(mel) for mel in mels]
+        wav_lens = [mel_len * self.hop_len for mel_len in mel_lens]
+        max_mel_len = max(mel_lens)
+
+        mel_embs = []
+
+        for mel in mels:
+            mel = mel.unsqueeze(0)
+            mel_emb, _ = self.mel_rnn(mel)
+            mel_emb = mel_emb.squeeze(0)
+            mel_embs.append(mel_emb)
+
+        mel_embs = pad_sequence(
+            mel_embs, batch_first=True, padding_value=float(self.quant_dim // 2)
+        )
         mel_embs = mel_embs.transpose(1, 2)
 
         conditions = F.interpolate(mel_embs, scale_factor=float(self.hop_len))
         conditions = conditions.transpose(1, 2)
 
-        hid = torch.zeros(mels.size(0), 1, self.wav_rnn_dim, device=mels.device)
+        hid = torch.zeros(1, batch_size, self.wav_rnn_dim, device=device)
         wav = torch.full(
-            (mels.size(0),), self.quant_dim // 2, dtype=torch.long, device=mels.device,
+            (batch_size,), self.quant_dim // 2, dtype=torch.long, device=device,
         )
         wavs = torch.empty(
-            mels.size(0),
-            mels.size(1) * self.hop_len,
-            dtype=torch.long,
-            device=mels.device,
+            batch_size, max_mel_len * self.hop_len, dtype=torch.long, device=device,
         )
 
         for i, condition in enumerate(torch.unbind(conditions, dim=1)):
@@ -79,12 +106,17 @@ class UniversalVocoder(nn.Module):
             _, hid = self.wav_rnn(
                 torch.cat((wav_emb, condition), dim=1).unsqueeze(1), hid
             )
-            logit = self.affine(hid.squeeze(1))
+            logit = self.affine(hid.squeeze(0))
             posterior = F.softmax(logit, dim=1)
             wav = torch.multinomial(posterior, 1).squeeze(1)
-            wavs[:, i] = 2 * wav.item() / (self.quant_dim - 1.0) - 1.0
+            wavs[:, i] = 2 * wav / (self.quant_dim - 1.0) - 1.0
 
         mu = self.quant_dim - 1
-        wavs = torch.sign(wavs) / mu * ((1 + mu) ** torch.abs(wavs) - 1)
+        wavs = torch.true_divide(torch.sign(wavs), mu) * (
+            (1 + mu) ** torch.abs(wavs) - 1
+        )
+        wavs = [
+            wav[:length] for wav, length in zip(torch.unbind(wavs, dim=0), wav_lens)
+        ]
 
         return wavs
