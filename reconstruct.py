@@ -3,6 +3,8 @@
 
 from warnings import filterwarnings
 from pathlib import Path
+from functools import partial
+from multiprocessing import Pool, cpu_count
 
 import torch
 import soundfile as sf
@@ -49,22 +51,29 @@ def main(
     model = torch.jit.load(ckpt_path)
     model.to(device)
 
-    wavs = [load_wav(audio_path, sample_rate) for audio_path in audio_paths]
-    mels = [
-        log_mel_spectrogram(
-            wav, preemph, sample_rate, n_mels, n_fft, hop_len, win_len, f_min
-        )
-        for wav in wavs
-    ]
-    mel_tensors = [torch.FloatTensor(mel).to(device) for mel in mels]
+    path2wav = partial(load_wav, sample_rate=sample_rate)
+    wav2mel = partial(
+        log_mel_spectrogram,
+        preemph=preemph,
+        sample_rate=sample_rate,
+        n_mels=n_mels,
+        n_fft=n_fft,
+        hop_length=hop_len,
+        win_length=win_len,
+        f_min=f_min,
+    )
 
-    print("mels length:")
-    for mel in mels:
-        print(len(mel))
+    with Pool(cpu_count()) as pool:
+        wavs = pool.map(path2wav, audio_paths)
+        mels = pool.map(wav2mel, wavs)
+
+    print("mels length:", [len(mel) for mel in mels])
+
+    mel_tensors = [torch.FloatTensor(mel).to(device) for mel in mels]
 
     with torch.no_grad():
         wavs = model.generate(mel_tensors)
-        wavs = [wav.cpu().numpy() for wav in wavs]
+        wavs = [wav.detach().cpu().numpy() for wav in wavs]
 
     for wav, audio_path in zip(wavs, audio_paths):
         wav_path_name = Path(audio_path).name

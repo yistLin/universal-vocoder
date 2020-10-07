@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.nn.utils.rnn import pad_sequence
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 
 
 class UniversalVocoder(nn.Module):
@@ -62,7 +62,7 @@ class UniversalVocoder(nn.Module):
     @torch.jit.export
     def generate(self, mels: List[Tensor]) -> List[Tensor]:
         """Generate waveform from mel spectrogram.
-        
+
         Args:
             mels: list of tensor of shape (mel_len, mel_dim)
 
@@ -70,42 +70,40 @@ class UniversalVocoder(nn.Module):
             wavs: list of tensor of shape (wav_len)
         """
 
+        # mels: List[(mel_len, mel_dim), ...]
         batch_size = len(mels)
         device = mels[0].device
 
         mel_lens = [len(mel) for mel in mels]
         wav_lens = [mel_len * self.hop_len for mel_len in mel_lens]
         max_mel_len = max(mel_lens)
+        max_wav_len = max_mel_len * self.hop_len
 
-        mel_embs = []
-
-        for mel in mels:
-            mel = mel.unsqueeze(0)
-            mel_emb, _ = self.mel_rnn(mel)
-            mel_emb = mel_emb.squeeze(0)
-            mel_embs.append(mel_emb)
-
-        mel_embs = pad_sequence(
-            mel_embs, batch_first=True, padding_value=float(self.quant_dim // 2)
+        pad_mels = pad_sequence(mels, batch_first=True)
+        pack_mels = pack_padded_sequence(
+            pad_mels, torch.tensor(mel_lens), batch_first=True, enforce_sorted=False
         )
+        pack_mel_embs, _ = self.mel_rnn(pack_mels)
+        mel_embs, _ = pad_packed_sequence(pack_mel_embs, batch_first=True)
+
+        # mel_embs: (batch, emb_dim, max_mel_len)
         mel_embs = mel_embs.transpose(1, 2)
 
+        # conditions: (batch, emb_dim, max_wav_len)
         conditions = F.interpolate(mel_embs, scale_factor=float(self.hop_len))
+        # conditions: (batch, max_wav_len, emb_dim)
         conditions = conditions.transpose(1, 2)
 
         hid = torch.zeros(1, batch_size, self.wav_rnn_dim, device=device)
         wav = torch.full(
             (batch_size,), self.quant_dim // 2, dtype=torch.long, device=device,
         )
-        wavs = torch.empty(
-            batch_size, max_mel_len * self.hop_len, dtype=torch.long, device=device,
-        )
+        wavs = torch.empty(batch_size, max_wav_len, dtype=torch.float, device=device,)
 
         for i, condition in enumerate(torch.unbind(conditions, dim=1)):
             wav_emb = self.embedding(wav)
-            _, hid = self.wav_rnn(
-                torch.cat((wav_emb, condition), dim=1).unsqueeze(1), hid
-            )
+            wav_rnn_input = torch.cat((wav_emb, condition), dim=1).unsqueeze(1)
+            _, hid = self.wav_rnn(wav_rnn_input, hid)
             logit = self.affine(hid.squeeze(0))
             posterior = F.softmax(logit, dim=1)
             wav = torch.multinomial(posterior, 1).squeeze(1)
