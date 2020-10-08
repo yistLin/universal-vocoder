@@ -30,7 +30,8 @@ mels = [
     torch.randn(200, 80),
     torch.randn(300, 80),
 ]
-wavs = vocoder.generate(mels)
+with torch.no_grad():
+    wavs = vocoder.generate(mels)
 ```
 
 Emperically, if you're using the default architecture, you can generate 100 samples at the same time on an Nvidia GTX 1080 Ti.
