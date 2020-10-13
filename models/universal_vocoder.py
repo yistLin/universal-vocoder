@@ -70,7 +70,6 @@ class UniversalVocoder(nn.Module):
             wavs: list of tensor of shape (wav_len)
         """
 
-        # mels: List[(mel_len, mel_dim), ...]
         batch_size = len(mels)
         device = mels[0].device
 
@@ -84,15 +83,13 @@ class UniversalVocoder(nn.Module):
             pad_mels, torch.tensor(mel_lens), batch_first=True, enforce_sorted=False
         )
         pack_mel_embs, _ = self.mel_rnn(pack_mels)
-        mel_embs, _ = pad_packed_sequence(pack_mel_embs, batch_first=True)
+        mel_embs, _ = pad_packed_sequence(
+            pack_mel_embs, batch_first=True
+        )  # (batch, max_mel_len, emb_dim)
 
-        # mel_embs: (batch, emb_dim, max_mel_len)
         mel_embs = mel_embs.transpose(1, 2)
-
-        # conditions: (batch, emb_dim, max_wav_len)
         conditions = F.interpolate(mel_embs, scale_factor=float(self.hop_len))
-        # conditions: (batch, max_wav_len, emb_dim)
-        conditions = conditions.transpose(1, 2)
+        conditions = conditions.transpose(1, 2)  # (batch, max_wav_len, emb_dim)
 
         hid = torch.zeros(1, batch_size, self.wav_rnn_dim, device=device)
         wav = torch.full(
