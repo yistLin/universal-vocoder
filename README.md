@@ -14,7 +14,7 @@ python preprocess.py VCTK-Corpus LibriTTS/train-clean-100 preprocessed
 ### Train from scratch
 
 ```bash
-python train.py preprocessed preprocessed/metadata.json
+python train.py preprocessed
 ```
 
 ### Generate waveforms

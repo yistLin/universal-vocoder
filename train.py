@@ -23,7 +23,6 @@ def parse_args():
     """Parse command-line arguments."""
     parser = ArgumentParser()
     parser.add_argument("data_dir", type=str)
-    parser.add_argument("metadata_path", type=str)
     parser.add_argument("--n_workers", type=int, default=8)
     parser.add_argument("--save_dir", type=str, default=".")
     parser.add_argument("--comment", type=str)
@@ -50,7 +49,6 @@ def parse_args():
 
 def main(
     data_dir,
-    metadata_path,
     n_workers,
     save_dir,
     comment,
@@ -75,7 +73,11 @@ def main(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = VocoderDataset(
-        data_dir, metadata_path, frames_per_sample, frames_per_slice, bits
+        data_dir,
+        Path(data_dir) / "metadata.json",
+        frames_per_sample,
+        frames_per_slice,
+        bits,
     )
     lengths = [
         trainlen := int((1 - valid_ratio) * len(dataset)),
