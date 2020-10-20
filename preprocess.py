@@ -107,7 +107,7 @@ def main(
         "n_fft": n_fft,
         "n_mels": n_mels,
         "f_min": f_min,
-        "utterances": [future.result() for future in tqdm(futures)],
+        "utterances": [future.result() for future in tqdm(futures, ncols=0)],
     }
 
     with open(save_dir / "metadata.json", "w") as f:
